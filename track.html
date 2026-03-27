@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>材料送審管理系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        body { background-color: #FAF9F6; color: #44403c; font-family: sans-serif; }
+        .rounded-huge { border-radius: 2rem; }
+        [v-cloak] { display: none; }
+        /* 強調顯示：核文日期與備註放大 */
+        .font-data-xl { font-size: 1.4rem; font-weight: 900; color: #1e40af; line-height: 1.2; }
+        .font-note-xl { font-size: 1.2rem; font-weight: 700; color: #44403c; }
+    </style>
+</head>
+<body>
+    <div id="app" v-cloak class="min-h-screen p-4 pb-32 space-y-6">
+        
+        <div class="flex justify-between items-center px-2">
+            <div class="text-[10px] font-bold text-stone-400 tracking-widest">LALA</div>
+            <button @click="toggleAdmin" :class="isAdmin ? 'text-emerald-600 font-bold bg-emerald-50 px-4 py-1.5 rounded-full shadow-sm' : 'text-stone-300 bg-stone-100 px-4 py-1.5 rounded-full'" class="text-xs flex items-center gap-2 transition-all">
+                <i data-lucide="shield-check" class="w-4 h-4"></i> {{ isAdmin ? '管理模式 (已解鎖)' : '檢視模式' }}
+            </button>
+        </div>
+
+        <section class="bg-white rounded-huge shadow-lg border border-stone-100 overflow-hidden">
+            <div class="bg-emerald-600 p-6 flex items-center justify-between text-white shadow-inner">
+                <div class="flex items-center gap-3">
+                    <i data-lucide="check-circle" class="w-7 h-7"></i>
+                    <h2 class="font-bold tracking-[0.2em] text-xl">縣府已核文</h2>
+                </div>
+                <button v-if="isAdmin" @click="openModal('approved')" class="bg-white/20 p-2 rounded-full hover:bg-white/40">
+                    <i data-lucide="plus" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="text-stone-400 border-b border-stone-100 text-xs">
+                        <tr>
+                            <th class="p-5">項目名稱</th>
+                            <th class="p-5 text-blue-800 font-bold">核文日期</th>
+                            <th class="p-5">核文備註</th>
+                            <th v-if="isAdmin" class="p-5 text-center">編輯</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="item in approvedList" :key="item.id" class="border-b border-stone-50 last:border-0 hover:bg-emerald-50/20">
+                            <td class="p-5 text-xl font-black text-stone-800">{{ item.name }}</td>
+                            <td class="p-5 font-data-xl underline decoration-blue-200">{{ item.date }}</td>
+                            <td class="p-5 font-note-xl leading-tight">{{ item.note || '-' }}</td>
+                            <td v-if="isAdmin" class="p-5 text-center">
+                                <button @click="editItem(item, 'approved')" class="text-emerald-600 p-2 bg-emerald-50 rounded-xl hover:scale-110 transition-transform"><i data-lucide="edit-2" class="w-5 h-5"></i></button>
+                            </td>
+                        </tr>
+                        <tr v-if="approvedList.length === 0">
+                            <td colspan="4" class="p-10 text-center text-stone-300 italic">尚未載入核文資料...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="space-y-4">
+            <h2 class="px-2 font-bold text-2xl flex items-center gap-3 text-stone-800">
+                <i data-lucide="clock" class="text-orange-400 w-8 h-8"></i> 送審進度追蹤
+            </h2>
+            
+            <div v-for="item in pendingList" :key="item.id" class="bg-white p-6 rounded-huge shadow-md border border-stone-100 relative overflow-hidden">
+                <div :class="['absolute left-0 top-0 bottom-0 w-3', item.status === '送審中' ? 'bg-blue-400' : 'bg-red-400']"></div>
+                <div class="flex justify-between items-start mb-4 ml-3">
+                    <div>
+                        <h3 class="text-2xl font-black text-stone-800 leading-tight">{{ item.name }}</h3>
+                        <p class="text-lg font-bold text-blue-700 mt-2 italic">備註：{{ item.factorycheck || '尚未填寫' }}</p>
+                    </div>
+                    <span :class="['text-xs px-4 py-2 rounded-full font-black shadow-inner tracking-widest', item.status === '送審中' ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600']">
+                        {{ item.status }}
+                    </span>
+                </div>
+                <div class="ml-3 space-y-4">
+                    <div class="flex items-center gap-3 bg-stone-50 p-4 rounded-2xl border border-stone-100/50">
+                        <i data-lucide="factory" class="w-5 h-5 text-stone-400"></i>
+                        <span class="text-stone-500 font-medium text-lg">廠商：<span class="text-stone-900 font-black">{{ item.vendor }}</span></span>
+                    </div>
+                    <div v-if="item.reason" class="p-4 bg-red-50/50 rounded-2xl border border-red-100 text-red-700 text-lg font-bold">原因：{{ item.reason }}</div>
+                    <div v-if="isAdmin" class="flex justify-end gap-3 pt-4 border-t border-stone-50">
+                        <button @click="editItem(item, 'pending')" class="flex-1 py-4 bg-blue-50 text-blue-700 rounded-xl font-black text-sm flex items-center justify-center gap-2"><i data-lucide="edit-3" class="w-5 h-5"></i> 修改</button>
+                        <button v-if="item.status === '送審中'" @click="moveToApproved(item)" class="flex-1 py-4 bg-emerald-600 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-lg"><i data-lucide="check-square" class="w-5 h-5"></i> 轉為已核文</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div v-if="isAdmin" class="fixed bottom-8 left-6 right-6 z-40">
+            <button @click="openModal('pending')" class="w-full py-5 bg-stone-900 text-white rounded-3xl font-black text-xl shadow-2xl flex items-center justify-center gap-3 active:scale-95 transition-all ring-4 ring-white">
+                <i data-lucide="plus" class="w-7 h-7"></i> 新增送審項目
+            </button>
+        </div>
+
+        <div v-if="showModal" class="fixed inset-0 bg-stone-900/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div class="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl">
+                <h2 class="text-2xl font-black mb-8 text-stone-800">{{ isEdit ? '修改項目' : '新增項目' }}</h2>
+                <div class="space-y-6">
+                    <div>
+                        <label class="text-xs font-black text-stone-400 ml-1 mb-1 block">項目名稱</label>
+                        <input v-model="tempItem.name" type="text" class="w-full bg-stone-50 rounded-2xl p-4 border-2 border-stone-100 outline-none font-black text-xl focus:border-emerald-500">
+                    </div>
+                    <template v-if="modalTarget === 'pending'">
+                        <input v-model="tempItem.vendor" type="text" placeholder="供應廠商" class="w-full bg-stone-50 rounded-2xl p-4 border-2 border-stone-100 font-bold">
+                        <select v-model="tempItem.status" class="w-full bg-stone-50 rounded-2xl p-4 border-2 border-stone-100 font-black text-emerald-600">
+                            <option value="送審中">⏳ 送審中</option>
+                            <option value="返回修正">❌ 返回修正</option>
+                        </select>
+                        <textarea v-if="tempItem.status === '返回修正'" v-model="tempItem.reason" placeholder="退件原因" class="w-full bg-red-50/30 rounded-2xl p-4 border-2 border-red-100 h-24 text-red-900 font-bold outline-none"></textarea>
+                        <input v-model="tempItem.factorycheck" type="text" placeholder="備註" class="w-full bg-blue-50/30 rounded-2xl p-4 border-2 border-blue-100 font-black text-blue-800 outline-none">
+                    </template>
+                    <template v-else>
+                        <input v-model="tempItem.date" type="date" class="w-full bg-stone-50 rounded-2xl p-4 border-2 border-stone-100 font-black text-2xl text-blue-900">
+                        <input v-model="tempItem.note" type="text" placeholder="核文備註" class="w-full bg-stone-50 rounded-2xl p-4 border-2 border-stone-100 font-bold text-xl text-stone-700">
+                    </template>
+                    <div class="flex gap-4 pt-6">
+                        <button @click="showModal = false" class="flex-1 py-4 bg-stone-100 text-stone-500 rounded-2xl font-black">取消</button>
+                        <button @click="saveToSupabase" class="flex-1 py-4 bg-stone-900 text-white rounded-2xl font-black shadow-lg">確認儲存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        const SUPABASE_URL = 'https://klhvmvszfqheabhartnd.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_sOyGCyhW8AFvm1hCUs_j4g_uM6FlF4c';
+        const _client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        const ADMIN_PW = "80471586"; 
+
+        createApp({
+            data() {
+                return {
+                    isAdmin: false,
+                    showModal: false,
+                    isEdit: false,
+                    modalTarget: 'pending',
+                    tempItem: {},
+                    approvedList: [],
+                    pendingList: []
+                }
+            },
+            methods: {
+                toggleAdmin() {
+                    if (this.isAdmin) this.isAdmin = false;
+                    else {
+                        const pw = prompt("請輸入管理員密碼：");
+                        if (pw === ADMIN_PW) this.isAdmin = true;
+                        else alert("密碼錯誤！");
+                    }
+                    this.$nextTick(() => lucide.createIcons());
+                },
+                async fetchData() {
+                    try {
+                        const { data, error } = await _client.from('material_reviews').select('*').order('created_at', { ascending: false });
+                        if (error) throw error;
+                        this.approvedList = data.filter(i => i.type === 'approved') || [];
+                        this.pendingList = data.filter(i => i.type === 'pending') || [];
+                    } catch (e) {
+                        console.error("抓取失敗:", e.message);
+                    } finally {
+                        this.$nextTick(() => lucide.createIcons());
+                    }
+                },
+                openModal(target) {
+                    this.isEdit = false;
+                    this.modalTarget = target;
+                    this.tempItem = target === 'pending' 
+                        ? { type: 'pending', name: '', vendor: '', status: '送審中', reason: '', factorycheck: '' }
+                        : { type: 'approved', name: '', date: new Date().toISOString().split('T')[0], note: '' };
+                    this.showModal = true;
+                    this.$nextTick(() => lucide.createIcons());
+                },
+                editItem(item, target) {
+                    this.isEdit = true;
+                    this.modalTarget = target;
+                    this.tempItem = { ...item };
+                    this.showModal = true;
+                    this.$nextTick(() => lucide.createIcons());
+                },
+                async saveToSupabase() {
+                    try {
+                        const { id, created_at, ...payload } = this.tempItem;
+                        let res;
+                        if (this.isEdit) res = await _client.from('material_reviews').update(payload).eq('id', id);
+                        else res = await _client.from('material_reviews').insert([payload]);
+                        if (res.error) throw res.error;
+                        this.showModal = false;
+                        await this.fetchData();
+                    } catch (e) {
+                        alert("儲存失敗：" + e.message);
+                    }
+                },
+                async moveToApproved(item) {
+                    if(!confirm(`確認將「${item.name}」核定轉入？`)) return;
+                    const updateData = {
+                        type: 'approved',
+                        date: new Date().toISOString().split('T')[0],
+                        note: `由系統自動結案 (${item.vendor})`,
+                        status: '已核文'
+                    };
+                    const { error } = await _client.from('material_reviews').update(updateData).eq('id', item.id);
+                    if (error) alert("轉換失敗");
+                    else await this.fetchData();
+                }
+            },
+            mounted() {
+                this.fetchData();
+                lucide.createIcons();
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
